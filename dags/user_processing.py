@@ -8,8 +8,8 @@ import json
 from datetime import datetime
 from pandas import json_normalize
 
-def _processing_user():
-    users = None
+def _processing_user(ti):
+    users = ti.xcom_pull(task_id='extracting_user')
     if not len(users) or 'results' not in users:
         raise Value('Users are empty')
     user = users['results'][0]
