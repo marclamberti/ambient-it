@@ -3,6 +3,7 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.operators.python import PythonOperator
 
+import json
 from datetime import datetime
 from pandas import json_normalize
 
@@ -52,6 +53,15 @@ with DAG('user_processing',
         poke_interval=60,
         timeout=10,
         soft_fail=False,
+    )
+
+    extracting_user = SimpleHttpOperator(
+        task_id='extracting_user',
+        http_conn_id='user_api',
+        endpoint='api/',
+        method='GET',
+        response_filter=lambda response: json.loads(response.text),
+        log_response=True
     )
 
     processing_user = PythonOperator(
