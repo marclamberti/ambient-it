@@ -3,19 +3,27 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.operators.python import PythonOperator
 from airflow.providers.http.operators.http import SimpleHttpOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 import json
 from datetime import datetime
 from pandas import json_normalize
 
+def _storing():
+    hook = PostgresHook(postgres_conn_id='postgres')
+    hook.copy_expert(
+        sql="COPY users FROM stdin WITH DELIMITER as ','",
+        filename='/tmp/processed_user.csv'
+    )
+
 def _processing_user(ti):
-    users = ti.xcom_pull(task_id='extracting_user')
+    users = ti.xcom_pull(task_ids='extracting_user')
     if not len(users) or 'results' not in users:
         raise Value('Users are empty')
     user = users['results'][0]
     processed_user = json_normalize({
         'firstname': user['name']['first'],
-        'lastname': user['name']['lastname'],
+        'lastname': user['name']['last'],
         'country': user['location']['country'],
         'username': user['login']['username'],
         'password': user['login']['password'],
@@ -68,4 +76,9 @@ with DAG('user_processing',
     processing_user = PythonOperator(
         task_id='processing_user',
         python_callable=_processing_user
+    )
+
+    storing = PythonOperator(
+        task_id='storing',
+        python_callable=_storing
     )
