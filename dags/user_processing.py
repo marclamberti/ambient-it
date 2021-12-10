@@ -3,56 +3,39 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.operators.python import PythonOperator
 from airflow.providers.http.operators.http import SimpleHttpOperator
-from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.utils.edgemodifier import Label
+from airflow.operators.bash import BashOperator
+from airflow.operators.python import BranchPythonOperator
+from airflow.operators.dummy import DummyOperator
 
 import json
-from datetime import datetime
-from pandas import json_normalize
+from datetime import datetime, timedelta
+from include.helpers.user_processing import _processing_user, _storing, _check_if_empty
 
-def _storing():
-    hook = PostgresHook(postgres_conn_id='postgres')
-    hook.copy_expert(
-        sql="COPY users FROM stdin WITH DELIMITER as ','",
-        filename='/tmp/processed_user.csv'
-    )
-
-def _processing_user(ti):
-    users = ti.xcom_pull(task_ids='extracting_user')
-    if not len(users) or 'results' not in users:
-        raise Value('Users are empty')
-    user = users['results'][0]
-    processed_user = json_normalize({
-        'firstname': user['name']['first'],
-        'lastname': user['name']['last'],
-        'country': user['location']['country'],
-        'username': user['login']['username'],
-        'password': user['login']['password'],
-        'email': user['email']
-    })
-    processed_user.to_csv('/tmp/processed_user.csv', index=None, 
-                          header=False)
-    
+default_args = {
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5),
+    'retry_exponential_backoff': True,
+    'email': ['marc@sfr.fr'],
+    'email_on_failure': True,
+    'email_on_retry': True
+}
 
 with DAG('user_processing',
     schedule_interval='@daily',
     start_date=datetime(2021, 1, 1),
     description='Processing user',
-    catchup=False
+    default_args=default_args,
+    catchup=False,
+    dagrun_timeout=timedelta(minutes=15),
+    template_searchpath=['/opt/airflow/include']
 ) as dag:
 
     creating_table = PostgresOperator(
         task_id='creating_table',
         postgres_conn_id='postgres',
-        sql='''
-            CREATE TABLE IF NOT EXISTS users (
-                firstname TEXT NOT NULL,
-                lastname TEXT NOT NULL,
-                country TEXT NOT NULL,
-                username TEXT NOT NULL,
-                password TEXT NOT NULL,
-                email TEXT NOT NULL PRIMARY KEY
-            );
-        '''
+        sql='sql/CREATE_TABLE_USERS.sql',
+        execution_timeout=timedelta
     )
     
     is_available_api = HttpSensor(
@@ -73,6 +56,15 @@ with DAG('user_processing',
         log_response=True
     )
 
+    check_if_empty = BranchPythonOperator(
+        task_id='check_if_empty',
+        python_callable=_check_if_empty
+    )
+    
+    is_empty = PythonOperator(
+        task_id='is_empty'
+    )
+
     processing_user = PythonOperator(
         task_id='processing_user',
         python_callable=_processing_user
@@ -82,3 +74,8 @@ with DAG('user_processing',
         task_id='storing',
         python_callable=_storing
     )
+    
+    #label_extract = Label("user extracted")
+    creating_table >> is_available_api >> extracting_user
+    extracting_user >> check_if_empty >> [is_empty, processing_user]
+    processing_user >> storing
