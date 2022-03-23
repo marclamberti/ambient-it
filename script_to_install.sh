@@ -7,9 +7,7 @@ apt-get -y install docker.io
 
 snap install docker
 
-usermod -aG docker $USER
-
-# Install VSCode
+# Install VSCodedocker
 apt-get -y install wget gpg
 wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
 install -o root -g root -m 644 packages.microsoft.gpdockerg /etc/apt/trusted.gpg.d/
